@@ -1,0 +1,549 @@
+﻿Build1=New_1,megaelektronik.expander_google,PL
+Build2=New_2,megaelektronik.stermax
+Build3=New_3,megaelektronik.stermax
+Build4=New_4,megaelektronik.stermax
+File1=apka.jpg.png
+File2=logo_aplikacja.jpg
+File3=Main.bal
+File4=sterowanie.bal
+File5=timer_setings.bal
+File6=Wydawca.bal
+FileGroup1=Default Group
+FileGroup2=Default Group
+FileGroup3=Default Group
+FileGroup4=Default Group
+FileGroup5=Default Group
+FileGroup6=Default Group
+Group=Default Group
+Library1=core
+Library2=gps
+Library3=phone
+Library4=runtimepermissions
+Library5=tabstripviewpager
+ManifestCode=AddManifestText(~\n~<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="35"/>~\n~<supports-screens android:largeScreens="true" ~\n~    android:normalScreens="true" ~\n~    android:smallScreens="true" ~\n~    android:anyDensity="true"/>)~\n~SetApplicationAttribute(android:icon, "@drawable/icon")~\n~SetApplicationAttribute(android:label, "$LABEL$")~\n~CreateResourceFromFile(Macro, Themes.LightTheme)~\n~SetApplicationAttribute(android:icon, "@mipmap/ic_launcher")~\n~CreateResource(mipmap-anydpi-v26, ic_launcher.xml,~\n~<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">~\n~<background android:drawable="@mipmap/background"/>~\n~<foreground android:drawable="@mipmap/foreground"/>~\n~</adaptive-icon>~\n~)
+Module1=Starter
+NumberOfFiles=6
+NumberOfLibraries=5
+NumberOfModules=1
+Version=13.4
+@EndOfDesignText@
+#Region Project Attributes
+	#ApplicationLabel:  Expander
+	#VersionCode: 1
+	'wersja google
+	#VersionName: 1.0.0
+	'SupportedOrientations possible values: unspecified, landscape or portrait.
+	#SupportedOrientations: portrait
+	#CanInstallToExternalStorage: False
+#End Region
+
+
+#AdditionalRes: ../icon
+
+#Region Activity Attributes
+	#FullScreen: False
+	#IncludeTitle: True
+#End Region
+#AdditionalJar: com.android.support:support-v4
+Sub Process_Globals
+	
+	Dim Timer3 As Timer
+	Public rp As RuntimePermissions
+	Dim PE As PhoneEvents
+	Dim PhoneId As PhoneId
+	'These global variables will be declared once when the application starts.
+	'These variables can be accessed from all modules.
+
+End Sub
+
+Sub Globals
+	'These global variables will be redeclared each time the activity is created.
+	'These variables can only be accessed from this module.
+
+	Dim sets As Map
+	Private TabStrip1 As TabStrip
+	Private Panel1 As Panel
+	Private Save_Tak As Button
+	'Private Save_Nie As Button
+	Private Label3 As Label
+	Private Label2 As Label
+	Private Label1 As Label
+	Private numer_urzadzenia As EditText
+	Private dodaj As Button
+	Private Usun As Button
+	Private Label4 As Label
+	Private Panel2 As Panel
+	Private Panel3 As Panel
+	Private Panel4 As Panel
+	Private Button1 As Button
+	Private Button2 As Button
+	Private Raport As Label
+	' Private numer_urzadzenia As EditText ' Zduplikowana deklaracja, usunięto
+	Private numery As EditText
+	
+	Private Button3 As Button
+	Private Button7 As Button
+	Private Button8 As Button
+	Private Button9 As Button
+	
+	Private off_1 As Button
+	Private off_2 As Button
+	Private on_1 As Button
+	Private on_2 As Button
+	Private panel_out1 As Panel
+	Private sterowanie_out1 As Label
+	Private sterowanie_out2 As Label
+	
+	Private timer_2 As Button
+	Private www As Label
+	Private button_raport As Button
+	
+	Private button_save_2 As Button
+	
+	Private label_timer_out2 As Label
+	Private label_wlaczaj_2 As Label
+	
+	Private panel_timer_2 As Panel
+	'Private button_save_name_out_1 As Button
+	'Private timer_3 As EditText
+	'Private proper_name_out1 As Label
+	'Private timer_4 As EditText
+	'Private panel_name_out2 As Panel
+
+	Private ARM_ON As Button
+	Private ARM_OFF As Button
+	Private Panel_ARM As Panel
+	Private timer As EditText
+	
+End Sub
+
+Sub Activity_Create(FirstTime As Boolean)
+	
+	Log("Activity_Create: Rozpoczęcie tworzenia aktywności.")
+	sets.Initialize
+	PE.InitializeWithPhoneState("PE", PhoneId)
+	
+	Activity.LoadLayout("Main")
+	
+	TabStrip1.LoadLayout("sterowanie", "⚙️ STEROWANIE")
+	TabStrip1.LoadLayout("timer_setings", "🛠️ USTAWIENIA")
+	TabStrip1.LoadLayout("Wydawca", "ℹ️ O APLIKACJI")
+	Log("Activity_Create: Layouts załadowane.")
+	
+End Sub
+
+
+Sub mnu1_Click
+	TabStrip1.ScrollTo(0, True)
+	Log("Menu: Wybrano zakładkę 'Sterowanie'.")
+End Sub
+
+Sub mnu2_Click
+	TabStrip1.ScrollTo(1, True)
+	Log("Menu: Wybrano zakładkę 'Ustawienia'.")
+End Sub
+
+Sub mnu3_Click
+	TabStrip1.ScrollTo(20, True)
+	Log("Menu: Wybrano zakładkę 'O aplikacji'.")
+End Sub
+
+'Sub TabStrip1_PageSelected (Position As Int)
+'	Log($"Current page: ${Position}"$)
+'End Sub
+
+Sub Activity_Resume
+	Log("Activity_Resume: Aktywność wznowiona.")
+	If File.Exists(File.DirInternal, "expander.set") Then
+		Log("Activity_Resume: Plik 'expander.set' istnieje. Odczytuję dane.")
+		CallSub("Main",read_text)
+	Else
+		Log("Activity_Resume: Plik 'expander.set' NIE istnieje. Tworzę nowy i zapisuję dane.")
+		CallSub ("Main", write_text)
+	End If
+End Sub
+
+Sub Activity_Pause (UserClosed As Boolean)
+	Log($"Activity_Pause: Aktywność wstrzymana. Użytkownik zamknął: ${UserClosed}"$)
+	If File.Exists(File.DirInternal, "expander.set") Then
+		Log("Activity_Pause: Plik 'expander.set' istnieje. Odczytuję dane przed pauzą.")
+		CallSub("Main",read_text)
+	Else
+		Log("Activity_Pause: Plik 'expander.set' NIE istnieje. Zapisuję dane przed pauzą.")
+		CallSub ("Main", write_text)
+		
+	End If
+End Sub
+
+
+Private Sub write_text
+	Log("write_text: Rozpoczęcie operacji zapisu danych.")
+	sets.Clear
+	Log("write_text: Mapa 'sets' wyczyszczona.")
+	sets.Put("numer_urzadzenia", numer_urzadzenia.Text)
+	sets.Put("timer", timer.Text)
+	Log($"write_text: Przygotowane dane do zapisu - numer_urzadzenia: ${numer_urzadzenia.Text}, timer: ${timer.Text}"$)
+	File.WriteMap(File.DirInternal, "expander.set", sets)
+	Log("write_text: Dane ZAPISANO do pliku 'expander.set'.")
+	CallSub ("Main",za_krotko_2)
+	StartActivity ("main")
+	Log("write_text: Zakończenie operacji zapisu danych.")
+End Sub
+
+
+Private Sub read_text
+	Log("read_text: Rozpoczęcie operacji odczytu danych.")
+	sets = File.ReadMap(File.DirInternal, "expander.set")
+	numer_urzadzenia.Text = sets.Get("numer_urzadzenia")
+	timer.Text = sets.Get("timer")
+	Log($"read_text: Dane ODCZYTANO z pliku 'expander.set' - numer_urzadzenia: ${numer_urzadzenia.Text}, timer: ${timer.Text}"$)
+End Sub
+
+
+Sub wykonuje
+	Log("wykonuje: Wyświetlam ProgressDialog.")
+	ProgressDialogShow ( "Wykonuję chwileczkę...")
+	Timer3.Enabled=False
+	Timer3.Initialize("Timer",5500)
+	Timer3.Enabled =True
+	Log("wykonuje: Timer3 uruchomiony na 5.5 sekundy.")
+End Sub
+
+
+
+
+Sub Timer_Tick
+	Log ("Timer_Tick: Timer odliczył czas. Ukrywam ProgressDialog.")
+	ProgressDialogHide
+	Timer3.Enabled =False
+End Sub
+
+
+'================Zapis numeru urządzenia==================================
+
+Private Sub Save_Tak_LongClick
+	Log("Save_Tak_LongClick: Długie kliknięcie 'Zapisz numer urządzenia'.")
+	sets.Clear
+	sets.Put("numer_urzadzenia", numer_urzadzenia.Text)
+	sets.Put("timer", timer.Text)
+	Log($"Save_Tak_LongClick: Dane do zapisu - numer_urzadzenia: ${numer_urzadzenia.Text}, timer: ${timer.Text}"$)
+	File.WriteMap(File.DirInternal, "expander.set", sets)
+	Log("Save_Tak_LongClick: Dane ZAPISANO do pliku 'expander.set' z Save_Tak_LongClick.")
+	CallSub ("Main",wykonuje)
+	Wait For (2000) Timeout
+	CallSub ("Main", write_text) ' Odczyt po zapisie, dla weryfikacji
+	Log("Save_Tak_LongClick: Zakończono operację zapisu i odczytu.")
+End Sub
+
+
+'============================================
+
+
+Private Sub dodaj_LongClick
+	Log($"dodaj_LongClick: Długie kliknięcie 'Dodaj'. Wysyłam komendę ADD z numerem: ${numery.Text}"$)
+	WyslijKomende (numer_urzadzenia.Text,"ADD^^"&numery.Text&"^" )
+	CallSub ("Main", wykonuje)
+	CallSub ("Main",za_krotko_2)
+End Sub
+
+Private Sub Usun_LongClick
+	Log("Usun_LongClick: Długie kliknięcie 'Usuń'. Wysyłam komendę DEL.")
+	WyslijKomende (numer_urzadzenia.Text ,"DEL^----^^" )
+	CallSub ("Main", wykonuje)
+	CallSub ("Main",za_krotko_2)
+End Sub
+
+
+
+'===========================Dane urzadzenia=====================
+Private Sub Otworz_Click
+	Log("Otworz_Click: Krótkie kliknięcie 'Otwórz'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub Zamknij_Click
+	Log("Zamknij_Click: Krótkie kliknięcie 'Zamknij'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+'=========KODY RAPORTY ===================================
+
+
+Private Sub lista_numerow_Click
+	Log("lista_numerow_Click: Krótkie kliknięcie 'Lista numerów'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+'===========ustawienia sterowanie ============================
+
+Private Sub on_1_LongClick
+	Log($"on_1_LongClick: Długie kliknięcie 'ON 1'. Wysyłam komendę OUT1#ON do ${numer_urzadzenia.Text}"$)
+	WyslijKomende(numer_urzadzenia.Text, "OUT1#ON")
+	CallSub("Main", "wykonuje")
+End Sub
+
+Private Sub off_1_LongClick
+	Log($"off_1_LongClick: Długie kliknięcie 'OFF 1'. Wysyłam komendę OUT1#OFF do ${numer_urzadzenia.Text}"$)
+	WyslijKomende(numer_urzadzenia.Text, "OUT1#OFF")
+	CallSub("Main", "wykonuje")
+End Sub
+
+Private Sub on_2_LongClick
+	Log($"on_2_LongClick: Długie kliknięcie 'ON 2'. Wysyłam komendę OUT2#ON do ${numer_urzadzenia.Text}"$)
+	WyslijKomende(numer_urzadzenia.Text, "OUT2#ON")
+	CallSub("Main", "wykonuje")
+End Sub
+
+Private Sub off_2_LongClick
+	Log($"off_2_LongClick: Długie kliknięcie 'OFF 2'. Wysyłam komendę OUT2#OFF do ${numer_urzadzenia.Text}"$)
+	WyslijKomende(numer_urzadzenia.Text, "OUT2#OFF")
+	CallSub("Main", "wykonuje")
+End Sub
+
+Private Sub ARM_ON_LongClick
+	Log($"ARM_ON_LongClick: Długie kliknięcie 'ARM ON'. Wysyłam komendę ALARM#ON do ${numer_urzadzenia.Text}"$)
+	WyslijKomende(numer_urzadzenia.Text, "ALARM#ON")
+	CallSub("Main", "wykonuje")
+End Sub
+
+Private Sub ARM_OFF_LongClick
+	Log($"ARM_OFF_LongClick: Długie kliknięcie 'ARM OFF'. Wysyłam komendę ALARM#LOCK do ${numer_urzadzenia.Text}"$)
+	WyslijKomende(numer_urzadzenia.Text, "ALARM#LOCK")
+	CallSub("Main", "wykonuje")
+End Sub
+
+Private Sub button_raport_LongClick
+	Log($"button_raport_LongClick: Długie kliknięcie 'Raport'. Wysyłam komendę RAPORT do ${numer_urzadzenia.Text}"$)
+	WyslijKomende(numer_urzadzenia.Text, "RAPORT")
+	CallSub("Main", "wykonuje")
+End Sub
+
+
+
+
+Private Sub timer_2_LongClick
+	Log("timer_LongClick: Długie kliknięcie 'Timer 2'.")
+	If timer.Text.Length > 5 Then
+		MsgboxAsync("Wprowadź maksymalnie 5 cyfr", "Błąd")
+		Log("timer_LongClick: Błąd walidacji - długość timera > 5 cyfr.")
+		Return
+	End If
+	
+	If IsNumber(timer.Text) = False Then
+		MsgboxAsync("Wprowadź tylko cyfry", "Błąd")
+		Log("timer_LongClick: Błąd walidacji - timer nie jest liczbą.")
+		Return
+	End If
+
+	If timer.Text > 99998 Then
+		MsgboxAsync("Liczba nie może być większa niż 99998s", "Błąd")
+		Log("timer_2_LongClick: Błąd walidacji - timer > 99998.")
+		Return
+	End If
+
+	' Przeliczanie sekund na godziny, minuty i sekundy
+	Dim seconds As Int = timer.Text
+	Dim hours As Int = seconds / 3600
+	Dim minutes As Int = (seconds Mod 3600) / 60
+	Dim remainingSeconds As Int = seconds Mod 60
+
+	' Tworzenie komunikatu z czasem
+	Dim timeMessage As String
+	If hours > 0 Then
+		timeMessage = $"Timer włączony na ${hours} godz."$
+		If minutes > 0 Or remainingSeconds > 0 Then
+			timeMessage = timeMessage & $", ${minutes} min."$
+		End If
+		If remainingSeconds > 0 Then
+			timeMessage = timeMessage & $", ${remainingSeconds} sek."$
+		End If
+	Else If minutes > 0 Then
+		timeMessage = $"Timer włączony na ${minutes} min."$
+		If remainingSeconds > 0 Then
+			timeMessage = timeMessage & $", ${remainingSeconds} sek."$
+		End If
+	Else
+		timeMessage = $"Timer włączony na ${remainingSeconds} sek."$
+	End If
+
+	' Wyświetlenie komunikatu
+	MsgboxAsync(timeMessage, "⏱ Informacja "&timer.Text)
+	Log($"timer_2_LongClick: Wyświetlono informację o timerze: ${timeMessage}"$)
+	Sleep(1500)
+	WyslijKomende(numer_urzadzenia.Text, "OUT2#ON " & timer.Text)
+	Log($"timer_2_LongClick: Wysłano komendę OUT2#ON z wartością timera: ${timer.Text}"$)
+	'CallSub("Main", "wykonuje")
+End Sub
+
+
+
+Private Sub WyslijKomende(numer As String, tresc As String)
+	Log($"WyslijKomende: Próba wysłania komendy SMS. Numer: '${numer}', Treść: '${tresc}'"$)
+	If numer.Trim = "" Then
+		ToastMessageShow("Numer telefonu jest pusty!", False)
+		Log("WyslijKomende: Błąd - numer telefonu jest pusty, nie można wysłać komendy.")
+		Return
+	End If
+	Dim SendIntent As Intent
+	SendIntent.Initialize(SendIntent.ACTION_VIEW, "sms:" & numer)
+	SendIntent.PutExtra("sms_body", tresc)
+	StartActivity(SendIntent)
+	Log("WyslijKomende: Intent SMS zainicjowany i uruchomiony.")
+End Sub
+
+
+Private Sub button_save_2_LongClick
+	Log("button_save_2_LongClick: Długie kliknięcie 'Zapisz Timer'.")
+	If timer.Text.Length > 5 Then
+		MsgboxAsync("Wprowadź maksymalnie 5 cyfr", "Błąd")
+		Log("button_save_2_LongClick: Błąd walidacji - długość timera > 5 cyfr.")
+		Return
+	End If
+	
+	If IsNumber(timer.Text) = False Then
+		MsgboxAsync("Wprowadź tylko cyfry", "Błąd")
+		Log("button_save_2_LongClick: Błąd walidacji - timer nie jest liczbą.")
+		Return
+	End If
+
+	If timer.Text > 99998 Then
+		MsgboxAsync("Liczba nie może być większa niż 99998s", "Błąd")
+		Return
+	End If
+
+	CallSub ("Main",wykonuje)
+	Wait For (2000) Timeout
+	CallSub ("Main", write_text) ' Zapisanie danych timera
+	Log("button_save_2_LongClick: Zakończono zapis danych timera.")
+End Sub
+
+
+'=================tylko click==============================
+
+
+Sub za_krotko
+	Log("za_krotko: Wykryto krótkie kliknięcie. Wyświetlam komunikat.")
+	ToastMessageShow ( "Przytrzymaj 3sek.",True)
+	Timer3.Enabled=False
+	Timer3.Initialize("Timer",1500)
+	Timer3.Enabled =True
+End Sub
+
+
+
+Sub za_krotko_2
+	Log("za_krotko_2: Rozpoczęto zapisywanie. Wyświetlam komunikat.")
+	MsgboxAsync("zapisuje", "⏱ Informacja ")
+	ToastMessageShow ( "Zapisuje",True)
+	Timer3.Enabled=False
+	Timer3.Initialize("Timer",2500)
+	Timer3.Enabled =True
+	Log("za_krotko_2: Zakończono wyświetlanie komunikatu zapisu.")
+		
+End Sub
+
+
+Private Sub button_raport_Click
+	Log("button_raport_Click: Krótkie kliknięcie 'Raport'.")
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub on_1_Click
+	Log("on_1_Click: Krótkie kliknięcie 'ON 1'.")
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub on_2_Click
+	Log("on_2_Click: Krótkie kliknięcie 'ON 2'.")
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub off_1_Click
+	Log("off_1_Click: Krótkie kliknięcie 'OFF 1'.")
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub off_2_Click
+	Log("off_2_Click: Krótkie kliknięcie 'OFF 2'.")
+	CallSub ("Main", za_krotko)
+End Sub
+' Private Sub timer_1_Click ' Brak takiej kontrolki w Globals
+' 	CallSub ("Main", za_krotko)
+' End Sub
+
+Private Sub timer_2_Click
+	Log("timer_2_Click: Krótkie kliknięcie 'Timer 2'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+' Private Sub button_save_1_Click ' Brak takiej kontrolki w Globals
+' 	CallSub ("Main", za_krotko)
+' End Sub
+
+Private Sub button_save_2_Click
+	Log("button_save_2_Click: Krótkie kliknięcie 'Zapisz Timer'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+Private Sub Raport_Click
+	Log("Raport_Click: Krótkie kliknięcie 'Raport' (kontrolka Label).")
+	CallSub ("Main", za_krotko)
+End Sub
+
+Private Sub zmianakodu_Click
+	Log("zmianakodu_Click: Krótkie kliknięcie 'Zmiana kodu'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub Save_Tak_Click
+	Log("Save_Tak_Click: Krótkie kliknięcie 'Zapisz Tak'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+' Private Sub Save_Nie_Click ' Zakamontowana kontrolka, brak potrzeby logowania
+' 	CallSub ("Main", za_krotko)
+' End Sub
+
+
+Private Sub dodaj_Click
+	Log("dodaj_Click: Krótkie kliknięcie 'Dodaj'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub usun_Click
+	Log("usun_Click: Krótkie kliknięcie 'Usuń'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+
+Private Sub ARM_OFF_Click
+	Log("ARM_OFF_Click: Krótkie kliknięcie 'ARM OFF'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+
+Private Sub ARM_ON_Click
+	Log("ARM_ON_Click: Krótkie kliknięcie 'ARM ON'.")
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+
+
+Private Sub Label2_Click
+	Log("Label2_Click: Kliknięto Label2. Próba otwarcia strony sonfy.pl.")
+	Dim i As Intent ' Deklarujemy zmienną typu Intent
+	
+	' Inicjalizujemy Intent.
+	' ACTION_VIEW to akcja do wyświetlania danych.
+	' URI to adres URL strony, którą chcesz otworzyć.
+	i.Initialize(i.ACTION_VIEW, "https://www.sonfy.pl") ' Zmień na swój adres URL
+	
+	' Uruchamiamy aktywność (przeglądarkę) z naszym Intentem
+	StartActivity(i)
+	Log("Label2_Click: Intent do otwarcia strony uruchomiony.")
+End Sub

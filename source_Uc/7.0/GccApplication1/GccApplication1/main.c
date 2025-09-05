@@ -1,0 +1,1077 @@
+// main.c
+/*
+ * Sim_Ster.c
+ *
+ * Created: 2015-07-04 11:45:39
+ * Author: Robert
+ *
+ * Description: Control application for a GSM expander device (AVR microcontroller).
+ * Manages GSM communication, outputs (OUT1, OUT2), temperature sensing, and alarms.
+ */
+
+#include <util/delay.h>
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <string.h>
+#include <stdlib.h>
+#include <avr/eeprom.h>
+#include <avr/wdt.h>
+#include <avr/pgmspace.h>
+#include <stdio.h> // Required for sscanf()
+#include <stdbool.h>
+
+#include "1Wire/ds18x20.h"
+#include "UART/mkuart.h"
+#include "define.h"
+#include "char.h"
+#include "funkcje.h" // Ensures function prototypes are included
+#include "tablice.h"
+
+// --- Global Variables ---
+volatile uint8_t out2_always_on_flag = 0;
+volatile uint8_t gsm_signal_percent = 0;  // GSM signal strength in % (0-100)
+volatile uint8_t timer6_expired_flag = 0; // Flag signaling Timer6 expiry
+
+// Variables for GSM reset management
+volatile uint8_t gsm_reset_count = 0;
+volatile unsigned long last_gsm_reset_time = 0;
+#define GSM_RESET_COOLDOWN 3000 // 30 seconds cooldown (in 10ms units)
+#define MAX_RESET_ATTEMPTS 3 // Maximum consecutive reset attempts
+
+// EEPROM variables (defined in funkcja.h/tablice.h likely, but re-declared here)
+char eem_buf_1[MOJ_BUFOR] EEMEM;
+char eem_buf_2[MOJ_BUFOR] EEMEM;
+
+// Global millisecond counter (10ms increments)
+volatile unsigned long milliseconds = 0;
+
+// --- Function Prototypes ---
+void mDelay(uint16_t ms);
+unsigned long get_current_milliseconds();
+void soft_timer_init(void);
+void analizuj_dane(char *buf);
+void rejestracja_sieci(void);
+void reset(void);
+void reset_power_GSM(void);
+void raport_globalny(void);
+void blink_signal_warning(void);
+void check_signal_and_blink(void);
+void out2_timed_on(uint32_t seconds);
+uint8_t should_reset_gsm(void);
+// Add other function prototypes if missing from `funkcje.h`
+
+// --- Timer2 ISR (10ms Tick) ---
+ISR(TIMER2_COMPA_vect) {
+    // Increment millisecond counter (NOTE: This is a 10ms counter, not true 1ms)
+    milliseconds++;
+
+    // Decrement software timers (Timer1-Timer6 are in 10ms units)
+    uint32_t n;
+
+    // Timer 1-5 (standard operations)
+    n = Timer1;
+    if (n) Timer1 = --n;
+    n = Timer2;
+    if (n) Timer2 = --n;
+    n = Timer3;
+    if (n) Timer3 = --n;
+    n = Timer4;
+    if (n) Timer4 = --n;
+    n = Timer5;
+    if (n) Timer5 = --n;
+
+    // Timer6 (OUT2 timed operation)
+    n = Timer6;
+    if (n) {
+        Timer6 = --n;
+        if (Timer6 == 0) {
+            // Set flag when Timer6 expires.
+            // OUT2 shutdown logic is handled in rejestracja_sieci() or main loop.
+            timer6_expired_flag = 1;
+        }
+    }
+}
+
+// --- Main Function ---
+int main(void) {
+    sei(); // Enable global interrupts
+    LED_OFF; // Turn off system LED
+
+    // Initialize EEPROM state based on previous state
+    volatile uint8_t out2_eeprom_state = eeprom_read_byte((uint8_t*)EEADDR_B);
+    volatile uint8_t out2_eeprom_mode = eeprom_read_byte((uint8_t*)EEADDR_F); // Read OUT2 mode
+
+    // OUT2 power reset logic
+    if (out2_eeprom_state == OUTB_ON) { // If OUT2 was ON before reset
+        if (out2_eeprom_mode == OUT2_MODE_ALWAYS_ON) {
+            // Restore "always on" state
+            OUT_B_ON;
+            uart_puts_P(OUT2_ON);
+            out2_always_on_flag = 1;
+            Timer6 = 0; // Clear timer for permanent ON
+        } else {
+            // OUT2_MODE_TIMED: Turn off after power reset for safety/consistency
+            OUT_B_OFF;
+            zapis_stanu_wyjsca_b(0); // Save OFF state to EEPROM
+            eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_TIMED); // Set mode to TIMED
+            out2_always_on_flag = 0;
+            Timer6 = 0;
+            uart_puts("OUT2 wylaczony (reset zasilania, tryb czasowy)\r");
+        }
+    } else {
+        // If OUT2 was OFF, keep it OFF
+        OUT_B_OFF;
+        uart_puts_P(OUT2_OFF);
+        out2_always_on_flag = 0;
+        eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_TIMED); // Set default mode
+    }
+
+    // Initialize Webasto status (if applicable)
+    odczyt_webasto();
+    zapis_webasto(0); // Ensure Webasto state is managed
+
+    // Initialize ports and GSM modem
+    PORTD_USTAW_WYJSCIOWY;
+    PORTC_USTAW_WYJSCIOWY;
+    eeprom_write_byte((uint8_t*)EEADDR_D, SIGNAL_H); // Initialize GSM signal threshold
+
+    USART_Init(__UBRR); // Initialize UART
+    reset_power_GSM(); // Power cycle and initialize GSM module
+
+    // Register UART callback for command processing
+    register_uart_str_rx_event_callback(analizuj_dane);
+
+    // Main loop
+    while (1) {
+        wdt_enable(WDTO_2S); // Enable/refresh Watchdog Timer (2 seconds)
+        rejestracja_sieci(); // Handle network registration and timers
+        UART_RX_STR_EVENT(uart_buf); // Process incoming UART data
+
+        // Check if GSM reset is needed - but not too often!
+        static unsigned long last_reset_check = 0;
+        unsigned long current_time = get_current_milliseconds();
+
+        if (current_time - last_reset_check > 500) { // Check only every 5 seconds
+            last_reset_check = current_time;
+            if (should_reset_gsm()) {
+                reset();
+            }
+        }
+    }
+}
+
+// --- Utility Functions ---
+
+/**
+ * @brief Simple delay function based on _delay_ms.
+ * @param ms Milliseconds to delay.
+ */
+void mDelay(uint16_t ms) {
+    while (ms--) {
+        _delay_ms(1);
+    }
+}
+
+/**
+ * @brief Returns the current time in 10ms units based on Timer2 counter.
+ * @return Current time in 10ms increments.
+ */
+unsigned long get_current_milliseconds() {
+    unsigned long current_ms;
+    cli(); // Disable interrupts to read multi-byte variable safely
+    current_ms = milliseconds;
+    sei(); // Re-enable interrupts
+    return current_ms;
+}
+
+/**
+ * @brief Checks if GSM modem should be reset due to poor signal quality.
+ * @return 1 if reset is needed, 0 otherwise.
+ */
+uint8_t should_reset_gsm(void) {
+    // If signal is very weak (<5%) for an extended period
+    static unsigned long weak_signal_start = 0;
+    unsigned long current_time = get_current_milliseconds();
+
+    if (gsm_signal_percent < 5) {
+        if (weak_signal_start == 0) {
+            weak_signal_start = current_time;
+        } else if (current_time - weak_signal_start > 12000) { // 120 seconds
+            weak_signal_start = 0;
+            return 1;
+        }
+    } else {
+        weak_signal_start = 0;
+    }
+
+    return 0;
+}
+
+// --- UART Command Analysis ---
+void analizuj_dane(char *buf) {
+    // Definicja adres√≥w EEPROM - TYLKO dla tablicy globalnej 2
+    //#define EEPROM_ADDR_GLOBAL_2 0x0A  // Adres 0x0A tylko dla drugiej tablicy
+    #define MAX_EEPROM_DATA 32         // Maksymalna d≈Çugo≈õƒá danych do EEPROM
+
+    // Flaga pierwszej inicjalizacji - odczyt tylko raz przy starcie
+    static uint8_t inicjalizacja = 0;
+
+    // ODczYT - tylko przy pierwszym wywo≈Çaniu funkcji
+    if (inicjalizacja == 0) {
+        inicjalizacja = 1;
+
+        // Bezpieczny odczyt - upewniamy siƒô ≈ºe nie wykraczamy poza rozmiar tablicy
+        uint8_t max_odczyt = MAX_EEPROM_DATA;
+        if (max_odczyt > sizeof(globalna_tablica_2)) {
+            max_odczyt = sizeof(globalna_tablica_2);
+        }
+
+        // Odczytaj dane z EEPROM do tablicy globalnej 2
+        eeprom_read_block(globalna_tablica_2, (void*)EEPROM_ADDR_GLOBAL_2, max_odczyt);
+
+        // Upewnij siƒô ≈ºe string jest poprawnie zako≈Ñczony
+        globalna_tablica_2[sizeof(globalna_tablica_2) - 1] = '\0';
+    }
+
+    // Tworzymy DWIE oddzielne kopie do parsowania
+    char kopia_do_cudzyslowow[MOJ_BUFOR];
+    char kopia_do_daszka[MOJ_BUFOR];
+    strcpy(kopia_do_cudzyslowow, buf);
+    strcpy(kopia_do_daszka, buf);
+
+    // Parsowanie CUDZYS≈ÅOW√ìW - TYLKO do tablicy globalnej 1 (bez EEPROM)
+    char *wsk1 = strtok(kopia_do_cudzyslowow, "\"");
+    wsk1 = strtok(NULL, "\"");
+    if (wsk1) {
+        // Tylko zapis do tablicy globalnej 1 (BRAK zapisu do EEPROM)
+        strncpy(globalna_tablica_1, wsk1, sizeof(globalna_tablica_1) - 1);
+        globalna_tablica_1[sizeof(globalna_tablica_1) - 1] = '\0';
+    }
+
+    // Parsowanie DASZKA - zapis do tablicy globalnej 2 i EEPROM
+  
+  
+  // Zastπp ca≥y blok z daszkiem w funkcji analizuj_dane() poniøszym kodem
+  char *start_of_data = strchr(buf, '^');
+  if (start_of_data != NULL) {
+	  // Sprawdzamy, czy w ogÛle coú jest po pierwszym daszku
+	  start_of_data++;
+	  if (*start_of_data == '\0') {
+		  return;
+	  }
+
+	  // Znajdü koniec ciπgu do zapisu (drugi daszek)
+	  char *end_of_data = strchr(start_of_data, '^');
+
+	  if (end_of_data != NULL) {
+		  // Oblicz d≥ugoúÊ danych miÍdzy daszkami
+		  uint8_t len = end_of_data - start_of_data;
+
+		  // --- DODATKOWE ZABEZPIECZENIE: SPRAWDZAJ TYLKO CYFRY ---
+		  bool is_valid_input = true;
+		  for (uint8_t i = 0; i < len; i++) {
+			  if (start_of_data[i] < '0' || start_of_data[i] > '9') {
+				  is_valid_input = false;
+				  break; // Znaleziono niedozwolony znak, przerwij pÍtlÍ
+			  }
+		  }
+		  // --------------------------------------------------------
+
+		  if (is_valid_input) {
+			  // Dane sπ poprawne, kontynuuj zapis
+			  if (len > MAX_EEPROM_DATA) {
+				  len = MAX_EEPROM_DATA;
+			  }
+
+			  // Zapisz dane do EEPROM
+			  eeprom_write_block(start_of_data, (void*)EEPROM_ADDR_GLOBAL_2, len);
+
+			  // Zapisz terminator \0 na koÒcu, aby ≥aÒcuch by≥ poprawny
+			  eeprom_write_byte((void*)(EEPROM_ADDR_GLOBAL_2 + len), '\0');
+
+			  // Skopiuj dane do tablicy w pamiÍci RAM
+			  strncpy(globalna_tablica_2, start_of_data, len);
+			  globalna_tablica_2[len] = '\0';
+
+			  blink_long();
+			  } else {
+			  // Wys≥ano niedozwolone znaki, nie zapisuj
+			  uart_puts_P(PSTR("ERROR: Niedozwolone znaki w komendzie.\r\n"));
+		  }
+	  }
+  }
+
+    // --- GSM and System Command Processing ---
+
+    // Handle OUT2#ON (including timed and permanent modes)
+    if (strncmp_P(buf, B_ON, strlen_P(B_ON)) == 0) {
+        char *ptr_to_seconds_str = buf + strlen_P(B_ON);
+        uint32_t seconds = 0;
+
+        // Check if a time value is provided
+        if (*ptr_to_seconds_str == ' ') {
+            ptr_to_seconds_str++;
+            seconds = atol(ptr_to_seconds_str);
+        }
+
+        // Process command based on parsed time
+        if (seconds == 99999 || *ptr_to_seconds_str == '\0') {
+            // Permanent ON (99999 or just "OUT2#ON")
+            blink_long();
+            OUT_B_ON;
+            zapis_stanu_wyjsca_b(1);
+            eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_ALWAYS_ON);
+            Timer6 = 0;
+            out2_always_on_flag = 1;
+            raport_odczyt_konfiguracji();
+            uart_puts("OUT2 wlaczony na stale\r");
+        } else if (seconds >= 1 && seconds <= 99998) {
+            // Timed ON
+            out2_timed_on(seconds);
+            eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_TIMED);
+            blink_long();
+            uart_puts("OUT2 wlaczony na ");
+            uart_putint(seconds, 10);
+            uart_puts(" sekund\r");
+            out2_always_on_flag = 0;
+        } else {
+            // Invalid time value
+            uart_puts("Blad: Nieprawidlowa wartosc czasu. Uzyj 1-99998s lub 99999 (stale)\r");
+        }
+    }
+    // Handle OUT1 ON/OFF
+ if (strncmp_P(buf, A_ON, strlen_P(A_ON)) == 0) {
+	 OUT_A_ON;
+	 blink_long();
+	 zapis_stanu_wyjsca_a(1);
+	 raport_odczyt_konfiguracji();
+ }
+ else if (strncmp_P(buf, A_OFF, strlen_P(A_OFF)) == 0) {
+	 OUT_A_OFF;
+	 blink_long();
+	 zapis_stanu_wyjsca_a(0);
+	 raport_odczyt_konfiguracji();
+ }
+    // Handle OUT2#OFF
+    else if (strcmp_P(buf, B_OFF) == 0) {
+        out2_always_on_flag = 0;
+        eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_TIMED); // Default to timed mode after OFF
+        OUT_B_OFF;
+        blink_long();
+        zapis_stanu_wyjsca_b(0);
+        raport_odczyt_konfiguracji();
+    }
+    // Handle ALL ON/OFF
+    else if (strcmp_P(buf, ALL_ON) == 0) {
+        OUT_A_ON;
+        OUT_B_ON;
+        blink_long();
+        zapis_stanu_wyjsca_a(1);
+        zapis_stanu_wyjsca_b(1);
+        raport_odczyt_konfiguracji();
+    }
+    else if (strcmp_P(buf, ALL_OFF) == 0) {
+        OUT_A_OFF;
+        OUT_B_OFF;
+        blink_long();
+        zapis_stanu_wyjsca_a(0);
+        zapis_stanu_wyjsca_b(0);
+        raport_odczyt_konfiguracji();
+    }
+    // Handle ALARM ON/OFF
+    else if (strcmp_P(buf, ALARM_ON) == 0) {
+        blink_long();
+        zapis_input(1);
+        raport_odczyt_konfiguracji();
+    }
+    else if (strcmp_P(buf, ALARM_OFF) == 0) {
+        blink_long();
+        zapis_input(0);
+        raport_odczyt_konfiguracji();
+    }
+    // Handle SPY, RESET, RAPORT
+    else if (strcmp_P(buf, SPY) == 0) {
+        spy();
+
+    }
+    else if (strcmp_P(buf, RESET) == 0) {
+        blink_long();
+        reset();
+    }
+    else if (strcmp_P(buf, RAPORT) == 0) {
+        raport_globalny();
+    }
+    // Handle RING/CLIP (Call Line Identification Presentation)
+    else if (strcmp_P(buf, CLPOFF) == 0) {
+    	 blink_long();
+        clip_zapis(1);
+        raport_odczyt_konfiguracji();
+    }
+    else if (strcmp_P(buf, RING) == 0) {
+        clip_odczyt();
+        blink_long();
+    }
+    else if (strcmp_P(buf, CLPON) == 0) {
+    	blink_long();
+        clip_zapis(0);
+        raport_odczyt_konfiguracji();
+    }
+    // Handle GSM Responses (+CSQ, +CREG)
+    else if (strstr(buf, "+CSQ:") != NULL) {
+        uint8_t csq_value;
+        if (sscanf(buf, "+CSQ: %hhu", &csq_value) == 1) {
+            // Convert CSQ value (0-31) to percentage (0-100%)
+            gsm_signal_percent = (csq_value >= 31) ? 100 : (csq_value * 100 / 31);
+        }
+    }
+    else if (strcmp(buf, "+CREG: 0,1") == 0 ||
+             strcmp(buf, "+CREG: 0,4") == 0 ||
+             strcmp(buf, "+CREG: 0,5") == 0) {
+        LED_OFF; // Network registered/roaming/unknown
+    }
+    else if (strcmp(buf, "+CREG: 0,0") == 0 || // Not registered, searching
+             strcmp(buf, "+CPIN: NOT READY") == 0 ||
+             strcmp(buf, "+CPIN: NOT INSERTED") == 0 ||
+             strcmp(buf, " +CSQ: 0,0") == 0 || // No signal
+             strcmp(buf, "+CREG: 0,3") == 0) // Registration denied
+    {
+        // Instead of immediate reset, check error frequency first
+        static unsigned long last_error_time = 0;
+        static uint8_t error_count = 0;
+        unsigned long current_time = get_current_milliseconds();
+
+        // If errors occur too frequently, then reset
+        if (current_time - last_error_time < 1000) { // Poprawka: 1000 jednostek (10s), zamiast 10000 (100s)
+            error_count++;
+            if (error_count > 2) { // Third error in short time
+                reset();
+                error_count = 0;
+            }
+        } else {
+            error_count = 0;
+        }
+        last_error_time = current_time;
+    }
+}
+
+// --- GSM Network Management ---
+
+// Variables for GSM polling intervals (10ms units)
+#define AT_INTERVAL_UNIT        150UL   // 1.5 seconds
+#define CREG_INTERVAL_UNIT      1000UL  // 10 seconds
+#define CSQ_INTERVAL_UNIT       2000UL  // 20 seconds
+
+unsigned long last_at_time = 0;
+unsigned long last_csq_time = 0;
+unsigned long last_creg_time = 0;
+
+typedef enum {
+    STATE_IDLE,
+    STATE_SEND_AT,
+    STATE_SEND_CREG,
+    STATE_SEND_CSQ,
+} NetworkRegistrationState;
+
+NetworkRegistrationState current_state = STATE_IDLE;
+
+/**
+ * @brief Handles network registration status, GSM polling, and timer expiration.
+ */
+void rejestracja_sieci(void) {
+    // 1. Handle Timer6 expiration (OUT2 timed shutdown)
+    if (timer6_expired_flag == 1) {
+        timer6_expired_flag = 0;
+
+        OUT_B_OFF;
+        zapis_stanu_wyjsca_b(0);
+        eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_TIMED);
+        out2_always_on_flag = 0;
+
+        uart_puts("OUT2 wylaczony po czasie\r");
+        raport_odczyt_konfiguracji();
+    }
+
+    // 2. Manage GSM polling state machine
+    unsigned long current_time = get_current_milliseconds();
+
+    switch (current_state) {
+        case STATE_IDLE:
+            if (current_time - last_at_time >= AT_INTERVAL_UNIT) {
+                current_state = STATE_SEND_AT;
+            } else if (current_time - last_creg_time >= CREG_INTERVAL_UNIT) {
+                current_state = STATE_SEND_CREG;
+            } else if (current_time - last_csq_time >= CSQ_INTERVAL_UNIT) {
+                current_state = STATE_SEND_CSQ;
+            }
+            break;
+
+        case STATE_SEND_AT:
+            wdt_enable(WDTO_2S);
+            uart_puts_P(AT);
+            last_at_time = current_time;
+            current_state = STATE_IDLE;
+            break;
+
+        case STATE_SEND_CREG:
+            uart_puts_P(ATCREG);
+            last_creg_time = current_time;
+            current_state = STATE_IDLE;
+            break;
+
+        case STATE_SEND_CSQ:
+            uart_puts_P(ATCSQ);
+            wdt_reset(); // Reset WDT before checking signal
+            check_signal_and_blink();
+            last_csq_time = current_time;
+            current_state = STATE_IDLE;
+            break;
+    }
+
+    // 3. Other periodic tasks (Timers 4 and 5)
+    if (!Timer4) {
+        Timer4 = 200; // 2 seconds
+        in(); // Check input status (KEY_DOWN)
+    }
+    if (!Timer5) {
+        // Correcting the Timer5 interval: 24000 units * 10ms = 240 seconds = 4 minutes
+        Timer5 = 24000;
+        odczyt_webasto();
+        zapis_webasto(0);
+    }
+}
+
+/**
+ * @brief Resets the GSM modem by power cycling it.
+ */
+void reset_power_GSM(void) {
+    odczyt_stanu_wyjscia_a(); // Read output states
+    odczyt_stanu_wyjscia_b();
+
+    // Power cycle sequence for GSM modem
+    PWR_GSM_ON;
+    mDelay(1000);
+    PWR_GSM_OFF;
+    LED_SYS_ON;
+    mDelay(6000); // Wait for modem boot
+
+    // Initial GSM setup commands
+    uart_puts_P(AT); mDelay(700);
+    uart_puts_P(AT); mDelay(700);
+    uart_puts_P(AT); mDelay(700);
+    uart_puts_P(ATZ); mDelay(700); // Reset modem
+    uart_puts_P(ATE0); mDelay(700); // Echo off
+
+    // Clean SMS memory
+    uart_puts_P(ATCMGF); mDelay(700); // Text mode SMS
+    uart_puts_P(ATCMGDA); mDelay(4000); // Delete all SMS
+
+    // Configure call/SMS notifications
+    uart_puts_P(ATCLIP); mDelay(1000);
+    uart_puts_P(ATCNMI); mDelay(1000);
+    uart_puts_P(ATCMGF); mDelay(1000);
+    uart_puts_P(ATCMIC); mDelay(1000);
+    uart_puts_P(ATCOLP); mDelay(1000);
+
+    soft_timer_init(); // Initialize Timer2 (10ms tick)
+}
+
+/**
+ * @brief Performs a software and hardware reset of the modem.
+ */
+void reset(void) {
+    // Check if enough time has passed since last reset
+    unsigned long current_time = get_current_milliseconds();
+
+    // If too soon for another reset
+    if (current_time - last_gsm_reset_time < GSM_RESET_COOLDOWN) {
+        gsm_reset_count++;
+
+        // If too many consecutive resets, wait longer and skip reset this time to avoid loop
+        if (gsm_reset_count >= MAX_RESET_ATTEMPTS) {
+            uart_puts("Za duzo resetow GSM, czekam 2 minuty i przerywam reset...\r");
+
+            // Wait 2 minutes using multiple delays with watchdog reset
+            for (uint16_t i = 0; i < 120; i++) {
+                mDelay(1000); // Delay 1 second
+                wdt_reset(); // Reset watchdog during long wait
+            }
+
+            gsm_reset_count = 0; // Reset counter after waiting
+            last_gsm_reset_time = get_current_milliseconds(); // Update time to prevent immediate retry
+            return; // Skip the reset this time to break potential loop
+        }
+        // Continue with reset if not exceeding max attempts
+    } else {
+        gsm_reset_count = 0; // Reset count if cooldown passed
+    }
+
+    // Update last reset time
+    last_gsm_reset_time = get_current_milliseconds();
+
+    // 1. Attempt software power down (AT+CPOWD=1)
+    wdt_disable();
+    uart_puts("AT+CPOWD=1\r");
+    mDelay(2000);
+    uart_puts("wysylam cpwd\r");
+
+    // 2. Hardware reset sequence
+    mDelay(1000);
+    PWR_GSM_ON;
+    mDelay(1000); // Hold PWR_KEY
+    PWR_GSM_OFF;
+    LED_SYS_ON;
+    mDelay(6000); // Wait for boot
+
+    // 3. Re-initialize modem
+    uart_puts_P(AT); mDelay(700);
+    uart_puts_P(AT); mDelay(700);
+    uart_puts_P(AT); mDelay(700);
+    uart_puts_P(ATZ); mDelay(700);
+    uart_puts_P(ATE0); mDelay(700);
+    uart_puts_P(ATCMGF); mDelay(700);
+    uart_puts_P(ATCMGDA); mDelay(4000);
+    uart_puts_P(ATCLIP); mDelay(2000);
+    uart_puts_P(ATCNMI); mDelay(1000);
+    uart_puts_P(ATCMGF); mDelay(1000);
+    uart_puts_P(ATCMIC); mDelay(1000);
+    uart_puts_P(ATCOLP);
+
+    uart_puts("inicjalizajcja zakonczona \r");
+
+    // Re-enable watchdog
+    wdt_enable(WDTO_2S);
+}
+
+// --- Reporting and Status Functions ---
+
+/**
+ * @brief Sends a comprehensive status report via SMS.
+ */
+void raport_globalny(void) {
+    mDelay(100);
+
+
+    // Send SMS header
+    uart_puts_P(CMGS);
+    mDelay(100);
+    uart_puts("\"");
+    mDelay(100);
+    uart_puts(globalna_tablica_1); // Recipient number
+    mDelay(100);
+    uart_puts("\"\r");
+    mDelay(100);
+
+    // Send system info
+    uart_puts_P(SYS);
+    mDelay(50);
+    signal_odczyt(); // GSM signal strength
+    mDelay(100);
+    temp(); // Temperature
+    mDelay(100);
+    uart_puts_P(ALDO);
+    uart_puts(globalna_tablica_2); // Alarm number
+    mDelay(50);
+    uart_puts_P(R);
+    odczyt_input_raport(); // Input alarm status
+    mDelay(50);
+    clip_raportuj();
+    mDelay(50);
+    odczyt_stanu_wyjscia_a(); // OUT1 status
+    mDelay(50);
+
+    // OUT2 status (ON/OFF/Timed)
+    uint8_t outb_state = eeprom_read_byte((uint8_t*)EEADDR_B);
+    uint8_t out2_eeprom_mode = eeprom_read_byte((uint8_t*)EEADDR_F);
+
+    if (outb_state == OUTB_ON) {
+        if (out2_eeprom_mode == OUT2_MODE_ALWAYS_ON) {
+            uart_puts("OUT2: ON\r");
+        } else if (Timer6 > 0) {
+            // Calculate remaining time in seconds (Timer6 is in 10ms units)
+            uint32_t seconds = Timer6 / 100;
+            uart_puts("OUT2: ON ");
+
+            if (seconds >= 3600) {
+                uint32_t hours = seconds / 3600;
+                uint32_t minutes = (seconds % 3600) / 60;
+                uart_putint(hours, 10);
+                uart_puts("h");
+                if (minutes > 0) {
+                    uart_puts(" : ");
+                    uart_putint(minutes, 10);
+                    uart_puts("min.");
+                }
+            } else if (seconds >= 60) {
+                uint32_t minutes = seconds / 60;
+                uint32_t remaining_seconds = seconds % 60;
+                uart_putint(minutes, 10);
+                uart_puts("min.");
+                if (remaining_seconds > 0) {
+                    uart_puts(" : ");
+                    uart_putint(remaining_seconds, 10);
+                    uart_puts("sek.");
+                }
+            } else {
+                uart_putint(seconds, 10);
+                uart_puts("sek.");
+            }
+            uart_puts("\r");
+        } else {
+            // State ON, but Timer6=0 and not always_on
+            uart_puts("OUT2: ON\r");
+        }
+    } else {
+        // State OFF
+        uart_puts("OUT2: OFF\r");
+    }
+
+    // Other reports
+    uart_puts_P(R);
+
+    // Firmware information
+    uart_puts("Model: Expander GSM \r");
+    mDelay(50);
+    uart_puts("Firmware: 5.7 (2025) \r");
+    mDelay(50);
+    uart_puts("www.sonfy.pl\r");
+
+    // Send SMS (Ctrl+Z character)
+    uart_putc('\x1A');
+    blink_long();
+    blink_long();
+    blink_long();
+	blink_long();
+	blink_long();
+}
+
+// --- EEPROM and State Management ---
+
+void zapis_stanu_wyjsca_b(uint8_t stan) {
+    if (stan == 1) {
+        eeprom_write_byte((uint8_t*)EEADDR_B, OUTB_ON);
+    } else {
+        eeprom_write_byte((uint8_t*)EEADDR_B, OUTB_OFF);
+    }
+}
+
+void zapis_stanu_wyjsca_a(uint8_t stan) {
+    if (stan == 1) {
+        eeprom_write_byte((uint8_t*)EEADDR_A, OUTA_ON);
+    } else {
+        eeprom_write_byte((uint8_t*)EEADDR_A, OUTA_OFF);
+    }
+}
+
+void raport_zapis_konfiguracji(uint8_t stan) {
+    wdt_reset();
+    if (stan == 1) {
+        eeprom_write_byte((uint8_t*)EEADDR_C, RAPORT_ON);
+    } else {
+        eeprom_write_byte((uint8_t*)EEADDR_C, RAPORT_OFF);
+    }
+}
+
+// Note: Function `raport()` calls `raport_globalny()`, so they are functionally the same.
+void raport(void) {
+    raport_globalny();
+}
+
+void raport_odczyt_konfiguracji(void) {
+    // Check if reporting is enabled in EEPROM (EEADDR_C) and send report if ON
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_C);
+    if (EEByte == RAPORT_ON) {
+        raport();
+    }
+}
+
+void clip_raportuj(void) {
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_E);
+    if (EEByte == CLIP_ON) {
+        uart_puts_P(RCLIP_ON);
+
+    } else {
+        uart_puts_P(RCLIP_OFF);
+
+    }
+}
+
+void signal_odczyt(void) {
+    uart_puts("Signal GSM: ");
+    uart_putint(gsm_signal_percent, 10);
+    uart_puts("%\r");
+}
+
+void clip_zapis(uint8_t stan) {
+    if (stan == 1) {
+        eeprom_write_byte((uint8_t*)EEADDR_E, CLIP_ON);
+    } else {
+        eeprom_write_byte((uint8_t*)EEADDR_E, CLIP_OFF);
+    }
+}
+
+void clip_odczyt(void) {
+    // Handle incoming RING based on CLIP setting
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_E);
+    uart_puts_P(ATH); // Hang up the call
+
+    if (EEByte != CLIP_ON) {
+        // If CLIP is OFF, toggle OUT2 state
+        arow_b();
+    }
+}
+
+void odczyt_stanu_wyjscia_a(void) {
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_A);
+    if (EEByte == OUTA_ON) {
+        OUT_A_ON;
+        uart_puts_P(OUT1_ON);
+    } else {
+        OUT_A_OFF;
+        uart_puts_P(OUT1_OFF);
+    }
+}
+
+void odczyt_stanu_wyjscia_b(void) {
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_B);
+    if (EEByte == OUTB_ON) {
+        uart_puts_P(OUT2_ON);
+    } else {
+        uart_puts_P(OUT2_OFF);
+    }
+}
+
+// --- Timer Initialization ---
+
+void soft_timer_init(void) {
+    /* Timer2 ‚Äì 10ms CTC mode (100Hz) */
+    TCCR2A |= (1 << WGM21); // CTC mode
+    TCCR2B |= (1 << CS22) | (1 << CS21) | (1 << CS20); // Prescaler = 1024
+    // F_CPU/1024UL/100UL (Target 100Hz frequency = 10ms interval)
+    OCR2A = F_CPU / 1024UL / 100UL;
+    TIMSK2 = (1 << OCIE2A); // Enable Compare Match A interrupt
+}
+
+// --- Specific Control Functions ---
+
+void arow_a() {
+    wdt_reset();
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_A);
+    if (EEByte == OUTA_ON) {
+        OUT_A_OFF;
+        mDelay(1500);
+        OUT_A_ON;
+    } else {
+        OUT_A_ON;
+        mDelay(1500);
+        OUT_A_OFF;
+    }
+}
+
+void arow_b() {
+    wdt_reset();
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_B);
+    if (EEByte == OUTB_ON) {
+        OUT_B_OFF;
+        mDelay(1500);
+        OUT_B_ON;
+    } else {
+        OUT_B_ON;
+        mDelay(1500);
+        OUT_B_OFF;
+    }
+}
+
+// --- Temperature Sensing ---
+
+void temp(void) {
+    wdt_reset();
+    czujniki = search_sensors();
+    DS18X20_start_meas(DS18X20_POWER_EXTERN, NULL);
+    mDelay(750); // Wait for conversion
+
+    if (DS18X20_OK == DS18X20_read_meas(gSensorIDs[0], &subzero, &cel, &cel_fract_bits)) {
+        uart_puts("Temp: ");
+        if (subzero)
+            uart_puts("-");
+        uart_putint(cel, 10);
+        uart_puts(".");
+        uart_putint(cel_fract_bits, 10);
+        uart_puts(" C\r");
+    } else {
+        // Sensor error
+        uart_puts_P(BCT); // "Brak czujnika temperatury"
+    }
+}
+
+// --- LED Blinking Functions ---
+
+void blink(void) {
+    // Short blink function
+    LED_SYS_ON;
+    mDelay(1200);
+    LED_OFF;
+    mDelay(364);
+}
+
+void blink_long(void) {
+    wdt_reset();
+    LED_SYS_ON;
+    mDelay(264);
+    LED_OFF;
+    mDelay(500);
+    wdt_reset();
+}
+
+void blink_fast(void){
+    LED_SYS_ON;
+    mDelay(64);
+    LED_OFF;
+    mDelay(150);
+    wdt_reset();
+}
+
+void blink_signal_warning(void) {
+    // Blink 3 times with long delay
+    for (int i = 0; i < 3; i++) {
+        blink();
+        wdt_reset();
+    }
+}
+
+void check_signal_and_blink(void) {
+    // Blink warning if GSM signal strength is below 45%
+    if (gsm_signal_percent < 45) {
+        blink_signal_warning();
+    }
+}
+
+// --- Alarm and Input Handling ---
+
+void send_in_alarm(void) {
+    LED_SYS_ON;
+    wdt_disable(); // Disable WDT during alarm sequence
+
+    mDelay(100);
+
+    // Send SMS alarm to globalna_tablica_2
+    uart_puts_P(CMGS);
+    mDelay(100);
+    uart_puts("\"");
+    mDelay(100);
+    uart_puts(globalna_tablica_2);
+    mDelay(100);
+    uart_puts("\"\r");
+    mDelay(1000);
+    uart_puts_P(ALARM); // Send "ALARM!" message
+    mDelay(100);
+    uart_putc('\x1A'); // End SMS
+    mDelay(5000);
+    uart_puts_P(ALARM);
+    mDelay(100);
+
+    // Initiate alarm call to globalna_tablica_2
+    uart_puts_P(ATD);
+    mDelay(100);
+    uart_puts(globalna_tablica_2);
+    mDelay(100);
+    uart_puts(";\r");
+    mDelay(100);
+    uart_putc('\x1A');
+
+    // Long blink sequence during alarm
+    int i;
+    for (i = 0; i < 150; i = i + 1) {
+    	 blink_fast();
+    }
+
+    uart_puts_P(ATH); // Hang up call
+}
+
+void in(void) {
+    wdt_reset();
+    // Check if KEY_DOWN
+    if (KEY_DOWN) {
+        mDelay(1500);
+        if ((KEY_DOWN) && (flaga == 1)) {
+            flaga = 0;
+            odczyt_input(); // Check if alarm reporting is enabled
+        }
+    } else if (!KEY_DOWN) {
+        mDelay(50);
+        if (!KEY_DOWN) {
+            flaga = 1;
+            PORTD |= (1 << PD2); // Set PD2 pin
+        }
+    }
+}
+
+void zapis_webasto(uint8_t stan) {
+    if (stan == 1) {
+        eeprom_write_byte((uint8_t*)EEADDR_W, WEBASTO_ON);
+    } else {
+        eeprom_write_byte((uint8_t*)EEADDR_W, WEBASTO_OFF);
+    }
+}
+
+void zapis_input(uint8_t stan) {
+    if (stan == 1) {
+        eeprom_write_byte((uint8_t*)EEADDR_I, INPUT_ON);
+    } else {
+        eeprom_write_byte((uint8_t*)EEADDR_I, INPUT_OFF);
+    }
+}
+
+void odczyt_input(void) {
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_I);
+    if (EEByte == INPUT_ON) {
+        send_in_alarm(); // Send alarm if input monitoring is ON
+    }
+}
+
+void odczyt_input_raport(void) {
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_I);
+    if (EEByte == INPUT_ON) {
+        uart_puts_P(ALA_ON); // Input Alarm ON
+    } else {
+        uart_puts_P(ALARM_LOCK); // alarm lock
+    }
+}
+
+void odczyt_webasto(void) {
+    // Checks Webasto state from EEPROM
+    volatile uint8_t EEByte = eeprom_read_byte((uint8_t*)EEADDR_W);
+    if (EEByte == WEBASTO_ON) {
+        OUT_B_OFF;
+        zapis_stanu_wyjsca_b(0);
+        eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_TIMED);
+        out2_always_on_flag = 0;
+    }
+}
+
+void spy(void) {
+    // Initiate call to globalna_tablica_1
+    uart_puts_P(ATD);
+    mDelay(100);
+    uart_puts(globalna_tablica_1);
+    mDelay(100);
+    uart_puts(";\r");
+    mDelay(100);
+    uart_putc('\x1A');
+}
+
+// --- OUT2 Timed Control ---
+
+/**
+ * @brief Activates OUT2 for a specified duration in seconds.
+ * @param seconds Duration in seconds (1 to 99999).
+ */
+void out2_timed_on(uint32_t seconds) {
+    if (seconds >= 1 && seconds <= 99999) {
+        OUT_B_ON;
+        zapis_stanu_wyjsca_b(1);
+        eeprom_write_byte((uint8_t*)EEADDR_F, OUT2_MODE_TIMED); // Set mode to timed
+        out2_always_on_flag = 0;
+        // Scale seconds to 10ms units (100 units/second)
+        Timer6 = seconds * 100;
+    }
+}

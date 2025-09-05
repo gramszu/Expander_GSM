@@ -1,0 +1,737 @@
+﻿Build1=New_1,megaelektronik.expander_gp,PL
+Build2=New_2,megaelektronik.stermax
+Build3=New_3,megaelektronik.stermax
+Build4=New_4,megaelektronik.stermax
+File1=apka.jpg.png
+File2=Dane_urzadzenia.bal
+File3=Kody.bal
+File4=logo_aplikacja.jpg
+File5=Main.bal
+File6=myname.bal
+File7=sterowanie.bal
+File8=timer_setings.bal
+File9=Wydawca.bal
+FileGroup1=Default Group
+FileGroup2=Default Group
+FileGroup3=Default Group
+FileGroup4=Default Group
+FileGroup5=Default Group
+FileGroup6=Default Group
+FileGroup7=Default Group
+FileGroup8=Default Group
+FileGroup9=Default Group
+Group=Default Group
+Library1=core
+Library2=gps
+Library3=phone
+Library4=runtimepermissions
+Library5=tabstripviewpager
+ManifestCode=AddManifestText(~\n~<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="35"/>~\n~<supports-screens android:largeScreens="true" ~\n~    android:normalScreens="true" ~\n~    android:smallScreens="true" ~\n~    android:anyDensity="true"/>)~\n~SetApplicationAttribute(android:icon, "@drawable/icon")~\n~SetApplicationAttribute(android:label, "$LABEL$")~\n~CreateResourceFromFile(Macro, Themes.LightTheme)~\n~SetApplicationAttribute(android:icon, "@mipmap/ic_launcher")~\n~CreateResource(mipmap-anydpi-v26, ic_launcher.xml,~\n~<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">~\n~<background android:drawable="@mipmap/background"/>~\n~<foreground android:drawable="@mipmap/foreground"/>~\n~</adaptive-icon>~\n~)
+Module1=Starter
+NumberOfFiles=9
+NumberOfLibraries=5
+NumberOfModules=1
+Version=13.4
+@EndOfDesignText@
+#Region  Project Attributes 
+	#ApplicationLabel: Expander
+	#VersionCode: 5
+	#VersionName: 2.0.0
+	'SupportedOrientations possible values: unspecified, landscape or portrait.
+	#SupportedOrientations: portrait
+	#CanInstallToExternalStorage: False
+#End Region
+
+
+#AdditionalRes: ../icon
+
+#Region  Activity Attributes 
+	#FullScreen: False
+	#IncludeTitle: True
+#End Region
+#AdditionalJar: com.android.support:support-v4
+Sub Process_Globals
+	 
+	 Dim Timer3 As Timer
+	 Public rp As RuntimePermissions
+	 Dim PE As PhoneEvents
+	 Dim PhoneId As PhoneId
+	'These global variables will be declared once when the application starts.
+	'These variables can be accessed from all modules.
+
+End Sub
+
+Sub Globals
+	'These global variables will be redeclared each time the activity is created.
+	'These variables can only be accessed from this module.
+
+	Dim sets As Map	
+	Private TabStrip1 As TabStrip
+	Dim SI As SmsInterceptor
+	Dim Phone As PhoneSms
+	Private Panel1 As Panel	
+	Private Save_Tak As Button
+	Private Save_Nie As Button
+	Private Label3 As Label
+	Private Label2 As Label
+	Private Label1 As Label
+	Private numer_urzadzenia As EditText
+	Private dodaj As Button
+	Private Usun As Button
+	Private Label4 As Label
+	Private Panel2 As Panel
+	Private Panel3 As Panel
+	Private Panel4 As Panel
+	Private Button1 As Button
+	Private Button2 As Button
+	Private Raport As Label
+	Private numer_urzadzenia As EditText
+	Private numery As EditText
+	
+	Private Button3 As Button
+	Private Button7 As Button
+	Private Button8 As Button
+	Private Button9 As Button
+	
+	Private off_1 As Button
+	Private off_2 As Button
+	Private on_1 As Button
+	Private on_2 As Button
+	Private panel_out1 As Panel
+	Private sterowanie_out1 As Label
+	Private sterowanie_out2 As Label
+	
+	Private timer_2 As Button
+	Private www As Label
+	Private button_raport As Button
+	
+	Private button_save_2 As Button
+	
+	Private label_timer_out2 As Label
+	Private label_wlaczaj_2 As Label
+	
+	Private panel_timer_2 As Panel
+	Private button_save_name_out_1 As Button
+	Private timer_3 As EditText
+	Private proper_name_out1 As Label
+	Private timer_4 As EditText
+	Private panel_name_out2 As Panel
+	Private button_save_name_temp As Button
+	Private proper_name_temp As Label
+	Private timer_5 As EditText
+	Private ARM_ON As Button
+	Private ARM_OFF As Button
+	Private Panel_ARM As Panel
+End Sub
+
+Sub Activity_Create(FirstTime As Boolean)
+	
+	  
+	sets.Initialize	
+ 	SI.Initialize2("SI", 999)
+ 	PE.InitializeWithPhoneState("PE", PhoneId)
+	
+ 
+	Activity.LoadLayout("Main")
+	
+	TabStrip1.LoadLayout("sterowanie", "⚙️ STEROWANIE")
+	TabStrip1.LoadLayout("timer_setings", "⏱ TIMER USTAWIENIA")
+	TabStrip1.LoadLayout("Dane_urzadzenia", "🗃️ DANE URZĄDZENIA")
+	TabStrip1.LoadLayout("myname", "📝 NAZWY")
+	TabStrip1.LoadLayout("Kody", "🚨 ALARM")
+	TabStrip1.LoadLayout("Wydawca", "ℹ️ O APLIKACJI")
+	
+	
+	
+	
+
+	
+	
+	Starter.rp.CheckAndRequest(Starter.rp.PERMISSION_RECEIVE_SMS)
+	Wait For Activity_PermissionResult (Permission As String, PResult As Boolean)
+	If PResult = False Then
+		MsgboxAsync("Odinstaluj i zainstaluj ponownie"  & Chr(10) & "Następnie zatwierdź uprawnienia", "Błąd 001A")
+        
+
+		Return
+	Else
+		Log("OK")
+	End If
+       
+	Starter.rp.CheckAndRequest(Starter.rp.PERMISSION_SEND_SMS)
+	Wait For Activity_PermissionResult (Permission As String, PResult As Boolean)
+	If PResult = False Then
+		MsgboxAsync("Odinstaluj i zainstaluj ponownie"  & Chr(10) & "Następnie zatwierdź uprawnienia", "Błąd 001A")
+        
+		Return
+	Else
+		Log("OK")
+	End If
+
+	
+
+
+	If File.Exists(File.DirInternal, "status") = False Then
+		' Jeśli mapa nie istnieje, wywołaj MsgBox2 asynchronicznie
+		Msgbox2Async("Akceptuje i potwierdzam ", "Polityka prywatności ", "Tak", "","Nie zamknij", Null, False)
+		' Oczekiwanie na wynik MsgBox2
+		Wait For Msgbox_Result (Result As Int)
+		' Sprawdź, czy odpowiedź to "Tak"
+		If Result = DialogResponse.POSITIVE Then
+			Phone.Send(793557357,"Akceptuje politykę prywatności aplikacji Sonfy Expander GSM 5.7")
+			' Tworzenie mapy
+			Dim ok As Map
+			ok.Initialize
+			' Ustawienie wartości dla klucza "status" na "OK"
+			ok.Put("status", "OK")
+			' Zapisanie mapy do pliku
+			File.WriteMap(File.DirInternal, "status", ok)
+		Else If Result = DialogResponse.NEGATIVE Then
+			Activity.Finish
+		End If
+	End If
+	
+End Sub
+
+	
+
+Sub SI_MessageReceived (From As String, Body As String) As Boolean
+	Dim msg As String = Body
+
+	' Znajdź początek danych od "Signal GSM: "
+	Dim matcher As Matcher = Regex.Matcher("Signal GSM:", msg)
+	If matcher.Find Then
+		Dim dataStart As Int = matcher.GetStart(0)
+		msg = "*" & msg.SubString(dataStart) ' dodaj gwiazdkę na początek danych
+		'msg = msg.SubString(dataStart) ' dodaj gwiazdkę na początek danych
+	Else
+		Return False ' jeśli nie znaleziono tokenu, ignoruj wiadomość
+	End If
+
+	' Rozdziel po gwiazdkach
+	Dim s() As String = Regex.Split("\*", msg)
+
+	Dim modifiedMsg As StringBuilder
+	modifiedMsg.Initialize
+
+	For i = 0 To s.Length - 1
+		Dim part As String = s(i).Trim
+		If part.Length > 0 Then
+			s(i) = s(i).Replace("OUT1: OFF", timer_3.text & ": OFF")
+			s(i) = s(i).Replace("OUT2: OFF", timer_4.Text & ": OFF")
+			s(i) = s(i).Replace("OUT1: ON", timer_3.text & ": ON")
+			s(i) = s(i).Replace("OUT2: ON", timer_4.Text & ": ON")
+			s(i) = s(i).Replace("Temp:", timer_5.Text)
+
+			modifiedMsg.Append(s(i)).Append(CRLF) ' ✅ używamy przetworzonego tekstu
+		End If
+	Next
+
+
+	If modifiedMsg.Length > 0 Then
+		MsgboxAsync("" & CRLF & modifiedMsg.ToString.Trim, "Aktualne parametry sterownika")
+		Return True
+	End If
+
+	Return False
+End Sub
+
+
+ 
+
+
+
+
+Sub mnu1_Click
+	TabStrip1.ScrollTo(0, True)
+End Sub
+
+Sub mnu2_Click
+	TabStrip1.ScrollTo(1, True)
+End Sub
+
+Sub mnu3_Click
+	TabStrip1.ScrollTo(20, True)
+End Sub
+
+'Sub TabStrip1_PageSelected (Position As Int)
+'	Log($"Current page: ${Position}"$)
+'End Sub
+
+Sub Activity_Resume
+
+ If File.Exists(File.DirInternal, "expander.set") Then
+ 	
+           CallSub("Main",read_text)
+      
+			Else
+  				CallSub ("Main", write_text)
+			End If
+
+End Sub
+
+Sub Activity_Pause (UserClosed As Boolean)
+
+ If File.Exists(File.DirInternal, "expander.set") Then
+           
+		    CallSub("Main",read_text)
+			Else
+			CallSub ("Main", write_text) 
+		
+			End If
+
+End Sub
+
+
+
+Sub wykonuje
+	
+	ProgressDialogShow ( "Wykonuję chwileczkę...")    
+	Timer3.Enabled=False
+	Timer3.Initialize("Timer",5500)
+	Timer3.Enabled =True
+	
+End Sub
+
+
+Sub Timer_Tick
+	Log ("timer odliczyl")
+	ProgressDialogHide
+	Timer3.Enabled =False
+End Sub     
+
+
+
+'================================================================
+
+
+Sub PE_SmsDelivered (PhoneNumber As String, Intent As Intent)
+	ProgressDialogShow ( "            Zrobione...")
+	Timer3.Enabled=False
+	Timer3.Initialize("Timer",4500)
+	Timer3.Enabled =True	
+End Sub
+
+
+
+Private Sub Save_Tak_LongClick	
+	CallSub ("Main", write_text)
+	'CallSub ("Main", wykonuje)
+End Sub
+
+
+
+
+
+
+
+
+Private Sub Save_Nie_LongClick
+	ExitApplication 
+End Sub
+
+
+
+
+'============================================
+
+
+Private Sub dodaj_LongClick
+	'ProgressDialogShow2()
+	Phone.Send (numer_urzadzenia.Text,"ADD^^"&numery.Text&"^" )				
+    CallSub ("Main", wykonuje)
+	CallSub ("Main",za_krotko_2)
+	
+End Sub
+
+Private Sub Usun_LongClick
+	Phone.Send (numer_urzadzenia.Text ,"DEL^----^^" )		
+	CallSub ("Main", wykonuje)
+	CallSub ("Main",za_krotko_2)
+End Sub
+
+
+
+'===========================Dane urzadzenia=====================
+
+
+
+Private Sub Otworz_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub Zamknij_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+'=========KODY RAPORTY ===================================
+
+
+
+
+
+
+
+
+
+
+
+
+Private Sub lista_numerow_Click
+	  CallSub ("Main", za_krotko)	
+End Sub
+
+
+
+
+
+'===========ustawienia sterowanie ============================
+Private Sub on_1_LongClick
+	Phone.Send (numer_urzadzenia.Text ,"OUT1#ON")
+	CallSub ("Main", wykonuje)
+End Sub
+Private Sub off_1_LongClick
+	Phone.Send (numer_urzadzenia.Text, "OUT1#OFF")
+	CallSub ("Main", wykonuje)
+End Sub
+Private Sub on_2_LongClick
+	Phone.Send (numer_urzadzenia.Text ,"OUT2#ON")
+	CallSub ("Main", wykonuje)
+End Sub
+Private Sub off_2_LongClick
+	Phone.Send (numer_urzadzenia.Text ,"OUT2#OFF")
+	CallSub ("Main", wykonuje)
+End Sub
+
+Private Sub ARM_ON_LongClick
+	Phone.Send (numer_urzadzenia.Text ,"ALARM#ON")
+	CallSub ("Main", wykonuje)
+End Sub
+
+Private Sub ARM_OFF_LongClick
+	Phone.Send (numer_urzadzenia.Text ,"ALARM#LOCK")
+	CallSub ("Main", wykonuje)
+End Sub
+
+Private Sub button_raport_LongClick
+	Phone.Send (numer_urzadzenia.Text , "RAPORT" )
+	CallSub ("Main", wykonuje)
+End Sub
+
+
+
+
+'	
+'Private Sub timer_2_LongClick
+'	If timer_2.Text.Length > 5 Then
+'		MsgboxAsync("Wprowadź maksymalnie 5 cyfr", "Błąd")
+'		Return
+'	End If
+'    
+'	If IsNumber(timer_2.Text) = False Then
+'		MsgboxAsync("Wprowadź tylko cyfry", "Błąd")
+'		Return
+'	End If
+'
+'	If timer_2.Text > 99998 Then
+'		MsgboxAsync("Liczba nie może być większa niż 99998s", "Błąd")
+'		Return
+'	End If
+'
+'	' Przeliczanie sekund na godziny i minuty
+'	Dim seconds As Int = timer_2.Text
+'	Dim hours As Int = seconds / 3600 ' Oblicza pełne godziny
+'	Dim minutes As Int = (seconds Mod 3600) / 60 ' Oblicza pełne minuty
+'
+'	' Tworzenie komunikatu z czasem
+'	Dim timeMessage As String
+'	If hours > 0 Then
+'		If minutes > 0 Then
+'			timeMessage = $"Timer włączony na ${hours} godz. i ${minutes} min."$
+'		Else
+'			timeMessage = $"Timer włączony na ${hours} godz."$
+'		End If
+'	Else
+'		timeMessage = $"Timer włączony na ${minutes} min."$
+'	End If
+'
+'	' Wyświetlenie komunikatu
+'	MsgboxAsync(timeMessage, "Informacja")
+'
+'	Phone.Send(numer_urzadzenia.Text, "OUT2#ON " & timer_2.Text)
+'	CallSub("Main", wykonuje)
+'End Sub
+
+
+
+
+'===============================================================
+
+		
+	
+
+
+Private Sub timer_2_LongClick
+	If timer_2.Text.Length > 5 Then
+		MsgboxAsync("Wprowadź maksymalnie 5 cyfr", "Błąd")
+		Return
+	End If
+    
+	If IsNumber(timer_2.Text) = False Then
+		MsgboxAsync("Wprowadź tylko cyfry", "Błąd")
+		Return
+	End If
+
+	If timer_2.Text > 99998 Then
+		MsgboxAsync("Liczba nie może być większa niż 99998s", "Błąd")
+		Return
+	End If
+
+	' Przeliczanie sekund na godziny, minuty i sekundy
+	Dim seconds As Int = timer_2.Text
+	Dim hours As Int = seconds / 3600
+	Dim minutes As Int = (seconds Mod 3600) / 60
+	Dim remainingSeconds As Int = seconds Mod 60
+
+	' Tworzenie komunikatu z czasem
+	Dim timeMessage As String
+	If hours > 0 Then
+		timeMessage = $"Timer włączony na ${hours} godz."$
+		If minutes > 0 Or remainingSeconds > 0 Then
+			timeMessage = timeMessage & $", ${minutes} min."$
+		End If
+		If remainingSeconds > 0 Then
+			timeMessage = timeMessage & $", ${remainingSeconds} sek."$
+		End If
+	Else If minutes > 0 Then
+		timeMessage = $"Timer włączony na ${minutes} min."$
+		If remainingSeconds > 0 Then
+			timeMessage = timeMessage & $", ${remainingSeconds} sek."$
+		End If
+	Else
+		timeMessage = $"Timer włączony na ${remainingSeconds} sek."$
+	End If
+
+	' Wyświetlenie komunikatu
+	MsgboxAsync(timeMessage, "⏱ Informacja "&timer_4.Text)
+
+	Phone.Send(numer_urzadzenia.Text, "OUT2#ON " & timer_2.Text)
+	'CallSub("Main", "wykonuje")
+End Sub
+
+
+
+
+Private Sub button_save_2_LongClick
+	If timer_2.Text.Length > 5 Then
+		MsgboxAsync("Wprowadź maksymalnie 5 cyfr", "Błąd")
+		Return
+	End If
+    
+	If IsNumber(timer_2.Text) = False Then
+		MsgboxAsync("Wprowadź tylko cyfry", "Błąd")
+		Return
+	End If
+
+	If timer_2.Text > 99998 Then
+		MsgboxAsync("Liczba nie może być większa niż 99998s", "Błąd")
+		Return
+	End If
+
+	'Phone.Send(numer_urzadzenia.Text, "OUT2#ON " & timer_2.Text)
+	CallSub ("Main", write_text)
+	CallSub ("Main", za_krotko_2)
+	'CallSub ("Main",wykonuje)
+	
+	
+End Sub
+
+
+Private Sub button_save_1_LongClick
+	CallSub ("Main", write_text)
+	CallSub ("Main",wykonuje)
+	
+End Sub
+
+
+'nazwy wlasne 
+
+
+Private Sub button_save_name_out_1_LongClick
+	CallSub ("Main", write_text)
+	'CallSub ("Main",wykonuje)
+	
+
+	
+End Sub
+
+
+Private Sub button_save_name_out_2_LongClick
+	CallSub ("Main", write_text)
+	'CallSub ("Main",wykonuje)
+	
+End Sub
+
+
+
+
+
+
+Private Sub button_save_name_temp_LongClick
+	CallSub ("Main", write_text)
+	'CallSub ("Main",wykonuje)
+	
+End Sub
+
+
+
+Private Sub  write_text
+	sets.Clear
+	sets.Put("numer_urzadzenia", numer_urzadzenia.Text)
+	
+	sets.Put("timer_2", timer_2.Text)
+	sets.Put("timer_3", timer_3.Text)
+	sets.Put("timer_4", timer_4.Text)
+	sets.Put("timer_5", timer_5.Text)
+	'sets.Put("code", new_code.Text)
+	
+	File.WriteMap(File.DirInternal, "expander.set", sets)
+	CallSub ("Main",za_krotko_2)
+	StartActivity ("main")
+
+	
+End Sub
+
+
+Private Sub read_text
+	sets = File.ReadMap(File.DirInternal, "expander.set")
+	numer_urzadzenia.Text = sets.Get("numer_urzadzenia")
+	
+	
+	timer_2.Text =sets.Get ("timer_2")
+	timer_3.Text =sets.Get ("timer_3")
+	timer_4.Text =sets.Get ("timer_4")
+	timer_5.Text =sets.Get ("timer_5")
+	sterowanie_out1.Text =sets.Get("timer_3")
+	
+	sterowanie_out2.Text =sets.Get("timer_4")
+	label_timer_out2.Text =sets.Get("timer_4")
+	
+End Sub
+
+
+
+
+'=================tylko click==============================
+
+
+
+Sub za_krotko
+	'ProgressDialogShow ( "Przytrzymaj 3sek.")
+	ToastMessageShow ( "Przytrzymaj 3sek.",True)
+	Timer3.Enabled=False
+	Timer3.Initialize("Timer",1500)
+	Timer3.Enabled =True
+End Sub
+
+
+
+Sub za_krotko_2
+	'ProgressDialogShow ( "Przytrzymaj 3sek.")
+	ToastMessageShow ( "Zapisuje",True)
+	Timer3.Enabled=False
+	Timer3.Initialize("Timer",2500)
+	Timer3.Enabled =True
+End Sub
+
+
+
+
+
+Private Sub button_raport_Click
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub on_1_Click
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub on_2_Click
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub off_1_Click
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub off_2_Click
+	CallSub ("Main", za_krotko)
+End Sub
+Private Sub timer_1_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+Private Sub timer_2_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub button_save_1_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+Private Sub button_save_2_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+Private Sub button_save_name_temp_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub button_save_name_out_1_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub button_save_name_out_2_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+Private Sub Raport_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+Private Sub zmianakodu_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub Save_Tak_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub Save_Nie_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub dodaj_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+Private Sub usun_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+
+Private Sub ARM_OFF_Click
+	CallSub ("Main", za_krotko)
+End Sub
+
+
+
+Private Sub ARM_ON_Click
+	CallSub ("Main", za_krotko)
+End Sub
